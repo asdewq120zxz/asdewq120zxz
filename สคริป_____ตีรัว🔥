@@ -1,0 +1,385 @@
+-- Executor Version - Weapon Auto Attack GUI (FAST SCAN)
+-- วางใน Executor โดยตรง
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+
+-- เช็คว่าเป็นมือถือ
+if not UserInputService.TouchEnabled then
+    warn("⚠️ สคริปต์นี้สำหรับมือถือเท่านั้น!")
+    return
+end
+
+-- สร้าง GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "MobileWeaponGUI"
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.ResetOnSpawn = false
+
+-- Frame หลัก
+local MainButton = Instance.new("Frame")
+MainButton.Name = "AttackButton"
+MainButton.Size = UDim2.new(0, 85, 0, 85)
+MainButton.Position = UDim2.new(0.85, 0, 0.75, 0)
+MainButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+MainButton.BackgroundTransparency = 0.25
+MainButton.BorderSizePixel = 0
+MainButton.Active = true
+
+-- มุมโค้งมน
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0.35, 0)
+UICorner.Parent = MainButton
+
+-- เงา
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Thickness = 2
+UIStroke.Color = Color3.fromRGB(255, 255, 255)
+UIStroke.Parent = MainButton
+
+-- ข้อความ
+local StatusText = Instance.new("TextLabel")
+StatusText.Name = "Status"
+StatusText.Size = UDim2.new(1, 0, 1, 0)
+StatusText.BackgroundTransparency = 1
+StatusText.Text = "ปิด"
+StatusText.TextColor3 = Color3.fromRGB(255, 255, 255)
+StatusText.Font = Enum.Font.GothamBlack
+StatusText.TextSize = 22
+StatusText.TextStrokeTransparency = 0.5
+StatusText.Parent = MainButton
+
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+MainButton.Parent = ScreenGui
+
+-- ตัวแปรควบคุม (ปรับเป็น local สำหรับความเร็ว)
+local isEnabled = false
+local isDragging = false
+local dragStart, startPos
+local attackConnection
+local currentTools = {}
+local lastScanTime = 0
+local scanCooldown = 0.1
+local lastAttackTime = 0
+local attackSpeed = 0.1
+
+-- ⚡ เพิ่มตัวแปรสำหรับระบบล็อกตำแหน่ง
+local isPositionLocked = false
+local lockTimer = 0
+local lockStartTime = 0
+local isCountingForLock = false
+
+-- ⚡ **เพิ่มระบบ TP Walk ที่นี่** (ความเร็ว 0.9 ตายตัว)
+local tpWalkEnabled = false
+local tpWalkConnection
+
+-- ฟังก์ชันสแกนอาวุธแบบเร็ว (Optimized)
+local function fastScanWeapons()
+    currentTools = {}
+    
+    local character = player.Character
+    if not character then return {} end
+    
+    for _, item in pairs(character:GetChildren()) do
+        if item:IsA("Tool") then
+            currentTools[#currentTools + 1] = item
+        end
+    end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        local equippedTool = humanoid:FindFirstChildOfClass("Tool")
+        if equippedTool and not table.find(currentTools, equippedTool) then
+            currentTools[#currentTools + 1] = equippedTool
+        end
+    end
+    
+    task.spawn(function()
+        local toolCount = #currentTools
+        if isEnabled then
+            StatusText.Text = "เปิด\n"..toolCount.." อัน"
+        else
+            StatusText.Text = "ปิด\n"..toolCount.." อัน"
+        end
+    end)
+    
+    return currentTools
+end
+
+-- ฟังก์ชันโจมตีเร็ว (Optimized)
+local function fastAttack()
+    if not isEnabled or #currentTools == 0 then return end
+    
+    local now = tick()
+    if now - lastAttackTime < attackSpeed then return end
+    lastAttackTime = now
+    
+    for i = 1, 3 do
+        for _, weapon in ipairs(currentTools) do
+            if weapon and weapon.Parent then
+                pcall(function()
+                    weapon:Activate()
+                end)
+                
+                pcall(function()
+                    local clicker = weapon:FindFirstChildWhichIsA("ClickDetector")
+                    if clicker then
+                        fireclickdetector(clicker)
+                    end
+                end)
+            end
+        end
+        
+        if i < 3 then
+            task.wait(0.02)
+        end
+    end
+end
+
+-- ⚡ **เพิ่มฟังก์ชันเปิด/ปิด TP Walk ที่นี่**
+local function toggleTPWalk()
+    tpWalkEnabled = not tpWalkEnabled
+    
+    if tpWalkEnabled then
+        -- สร้าง connection สำหรับ TP Walk
+        tpWalkConnection = RunService.Heartbeat:Connect(function()
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum and hum.MoveDirection.Magnitude > 0 then
+                    -- ⚡ **ใช้ความเร็ว 0.9 ตายตัว** ⚡
+                    local speed = 0.9
+                    char:TranslateBy(hum.MoveDirection * speed)
+                end
+            end
+        end)
+        
+        print("✅ TP Walk เปิดใช้งานแล้ว (ความเร็ว 0.9)")
+    else
+        -- ปิด TP Walk
+        if tpWalkConnection then
+            tpWalkConnection:Disconnect()
+            tpWalkConnection = nil
+        end
+        
+        print("❌ TP Walk ปิดใช้งานแล้ว")
+    end
+end
+
+-- เปิด/ปิดโหมดโจมตี (เร็ว)
+local function toggleAttackMode()
+    isEnabled = not isEnabled
+    
+    if isEnabled then
+        MainButton.BackgroundColor3 = Color3.fromRGB(50, 220, 50)
+        StatusText.Text = "เปิด\n"..#currentTools.." อัน"
+        
+        attackConnection = RunService.Heartbeat:Connect(function(deltaTime)
+            if isEnabled then
+                fastAttack()
+            end
+        end)
+        
+        coroutine.wrap(function()
+            local trans = 0.15
+            while isEnabled do
+                MainButton.BackgroundTransparency = trans
+                trans = trans == 0.15 and 0.25 or 0.15
+                task.wait(0.3)
+            end
+            MainButton.BackgroundTransparency = 0.25
+        end)()
+        
+    else
+        MainButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+        StatusText.Text = "ปิด\n"..#currentTools.." อัน"
+        
+        if attackConnection then
+            attackConnection:Disconnect()
+            attackConnection = nil
+        end
+        
+        MainButton.BackgroundTransparency = 0.25
+    end
+end
+
+-- ระบบลากเคลื่อนย้าย (เร็ว) - แก้ไขให้คำนึงถึงการล็อกตำแหน่ง
+local function updateDrag(input)
+    if not isDragging or isPositionLocked then return end
+    
+    local delta = input.Position - dragStart
+    MainButton.Position = UDim2.new(
+        startPos.X.Scale,
+        startPos.X.Offset + delta.X,
+        startPos.Y.Scale,
+        startPos.Y.Offset + delta.Y
+    )
+end
+
+-- ⚡ ฟังก์ชันสำหรับระบบล็อกตำแหน่ง
+local function togglePositionLock()
+    isPositionLocked = not isPositionLocked
+    
+    if isPositionLocked then
+        -- แสดงว่าล็อกแล้ว (เปลี่ยนเป็นสีน้ำเงิน)
+        MainButton.BackgroundColor3 = Color3.fromRGB(50, 100, 220)
+        StatusText.Text = "ล็อก"
+        
+        -- เอฟเฟกต์วิบวับเมื่อล็อก
+        coroutine.wrap(function()
+            for i = 1, 3 do
+                MainButton.BackgroundTransparency = 0.1
+                task.wait(0.1)
+                MainButton.BackgroundTransparency = 0.25
+                task.wait(0.1)
+            end
+            
+            -- คืนสีตามสถานะโจมตี
+            if isEnabled then
+                MainButton.BackgroundColor3 = Color3.fromRGB(50, 220, 50)
+                StatusText.Text = "เปิด\n"..#currentTools.." อัน"
+            else
+                MainButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+                StatusText.Text = "ปิด\n"..#currentTools.." อัน"
+            end
+        end)()
+        
+        print("🔒 ล็อกตำแหน่ง GUI แล้ว")
+    else
+        -- คืนสีตามสถานะโจมตี
+        if isEnabled then
+            MainButton.BackgroundColor3 = Color3.fromRGB(50, 220, 50)
+            StatusText.Text = "เปิด\n"..#currentTools.." อัน"
+        else
+            MainButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+            StatusText.Text = "ปิด\n"..#currentTools.." อัน"
+        end
+        
+        print("🔓 ปลดล็อกตำแหน่ง GUI แล้ว")
+    end
+end
+
+-- การแตะและลาก (Optimized) - เพิ่มระบบจับเวลาเพื่อล็อกตำแหน่ง
+MainButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch then
+        local touchTime = tick()
+        local touchPos = input.Position
+        
+        -- เริ่มจับเวลาเพื่อล็อกตำแหน่ง (2 วินาที)
+        isCountingForLock = true
+        lockStartTime = touchTime
+        
+        -- ถ้ายังไม่ล็อกตำแหน่ง ให้สามารถลากได้
+        if not isPositionLocked then
+            isDragging = true
+            dragStart = input.Position
+            startPos = MainButton.Position
+        end
+        
+        MainButton.BackgroundTransparency = 0.4
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                isDragging = false
+                isCountingForLock = false
+                MainButton.BackgroundTransparency = isEnabled and 0.15 or 0.25
+                
+                -- ตรวจสอบว่าแตะหรือลาก
+                local duration = tick() - touchTime
+                local distance = (input.Position - touchPos).magnitude
+                
+                -- ถ้าแตะสั้นๆ (ไม่ถึง 2 วินาที) และไม่ลากมาก = เปิด/ปิดโหมดโจมตี
+                if duration < 0.2 and distance < 10 then
+                    toggleAttackMode()
+                end
+            end
+        end)
+    end
+end)
+
+-- ⚡ ตรวจสอบการกดค้าง 2 วินาทีเพื่อล็อก/ปลดล็อกตำแหน่ง
+RunService.Heartbeat:Connect(function(deltaTime)
+    if isCountingForLock then
+        local currentTime = tick()
+        local holdDuration = currentTime - lockStartTime
+        
+        -- ถ้ากดค้างเกิน 2 วินาที
+        if holdDuration >= 2 then
+            isCountingForLock = false
+            togglePositionLock()
+        end
+    end
+end)
+
+-- อัพเดทการลาก
+UserInputService.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch and isDragging then
+        updateDrag(input)
+    end
+end)
+
+-- ⚡ สแกนอาวุธแบบเร็วสุด
+RunService.Heartbeat:Connect(function(deltaTime)
+    local now = tick()
+    if now - lastScanTime >= scanCooldown then
+        lastScanTime = now
+        fastScanWeapons()
+    end
+end)
+
+-- สแกนเมื่อเปลี่ยนตัวละคร (เร็ว)
+player.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    fastScanWeapons()
+end)
+
+-- สแกนเมื่อ Equip/Unequip Tool (เร็วสุด)
+local function setupToolListener()
+    local backpack = player:WaitForChild("Backpack")
+    
+    local function immediateScan()
+        fastScanWeapons()
+    end
+    
+    backpack.ChildAdded:Connect(immediateScan)
+    backpack.ChildRemoved:Connect(immediateScan)
+    
+    player.CharacterAdded:Connect(function(char)
+        char.ChildAdded:Connect(immediateScan)
+        char.ChildRemoved:Connect(immediateScan)
+    end)
+end
+
+-- ⚡ **เพิ่มปุ่มคีย์บอร์ดสำหรับ TP Walk** (แตะยาว 2 ครั้งติดกัน)
+local lastTPWalkTime = 0
+MainButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch then
+        local currentTime = tick()
+        
+        -- ถ้ากดครั้งที่สองเร็วเกิน 0.5 วินาที = เปิด/ปิด TP Walk
+        if currentTime - lastTPWalkTime < 0.5 then
+            toggleTPWalk()
+            lastTPWalkTime = 0
+        else
+            lastTPWalkTime = currentTime
+        end
+    end
+end)
+
+-- เริ่มต้นสแกนทันที
+task.spawn(function()
+    fastScanWeapons()
+    setupToolListener()
+end)
+
+print("⚡ Mobile Weapon GUI โหลดสำเร็จ! (มีระบบล็อกตำแหน่ง)")
+print("📱 กดค้าง 2 วินาที: ล็อก/ปลดล็อกตำแหน่ง GUI")
+print("👉 แตะสั้นๆ: เปิด/ปิดโหมดโจมตี")
+print("👉 แตะค้างและลาก: ย้ายตำแหน่ง (เมื่อไม่ได้ล็อก)")
+print("⚡ แตะ 2 ครั้งเร็วๆ: เปิด/ปิด TP Walk (ความเร็ว 0.9)")
