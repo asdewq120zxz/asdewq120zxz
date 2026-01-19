@@ -1,0 +1,310 @@
+-- Roblox Inventory Script for Executors (Mobile Supported)
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+
+-- ลบ UI เก่าออกก่อนถ้าเคยรันแล้ว (ป้องกัน UI ซ้อน)
+if CoreGui:FindFirstChild("ModernInventory") then
+    CoreGui.ModernInventory:Destroy()
+end
+
+-- สร้าง ScreenGui ใน CoreGui (ทำให้ตายแล้ว UI ไม่หายแน่นอน)
+local sg = Instance.new("ScreenGui")
+sg.Name = "ModernInventory"
+sg.Parent = CoreGui
+sg.IgnoreGuiInset = true
+
+local hiddenItems = {}
+local isHideMode = false
+local viewingHidden = false
+local equippedItems = {} -- ตารางเก็บไอเทมที่ถูกเลือก
+
+-- ฟังก์ชันทำให้ UI ลากได้ (Mobile & PC)
+local function makeDraggable(frame)
+    local dragging, dragInput, dragStart, startPos
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+        end
+    end)
+    frame.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    frame.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+-- 1. ปุ่ม Toggle (Modern Circle)
+local toggle = Instance.new("TextButton")
+toggle.Size = UDim2.new(0, 55, 0, 55)
+toggle.Position = UDim2.new(0.05, 0, 0.4, 0)
+toggle.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+toggle.Text = "📦"
+toggle.TextSize = 25
+toggle.TextColor3 = Color3.new(1, 1, 1)
+toggle.Parent = sg
+local tCorner = Instance.new("UICorner")
+tCorner.CornerRadius = UDim.new(1, 0)
+tCorner.Parent = toggle
+local tStroke = Instance.new("UIStroke")
+tStroke.Thickness = 2
+tStroke.Color = Color3.fromRGB(255, 255, 255)
+tStroke.Transparency = 0.5
+tStroke.Parent = toggle
+makeDraggable(toggle)
+
+-- 2. Main Frame
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.Size = UDim2.new(0, 380, 0, 320)
+main.Position = UDim2.new(0.5, -190, 0.5, -160)
+main.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+main.Visible = false
+main.Parent = sg
+local mCorner = Instance.new("UICorner")
+mCorner.Parent = main
+makeDraggable(main)
+
+-- หัวข้อ
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 40)
+title.BackgroundTransparency = 1
+title.Text = "สคริปถือของ"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.Parent = main
+
+-- ส่วนแสดงผลไอเทม
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(0.68, 0, 0.75, 0)
+scroll.Position = UDim2.new(0.04, 0, 0.18, 0)
+scroll.BackgroundTransparency = 1
+scroll.ScrollBarThickness = 4
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.ScrollingDirection = Enum.ScrollingDirection.Y
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.Parent = main
+
+local grid = Instance.new("UIGridLayout")
+grid.CellSize = UDim2.new(0, 75, 0, 75)
+grid.CellPadding = UDim2.new(0, 5, 0, 5)
+grid.HorizontalAlignment = Enum.HorizontalAlignment.Left
+grid.VerticalAlignment = Enum.VerticalAlignment.Top
+grid.FillDirection = Enum.FillDirection.Horizontal
+grid.StartCorner = Enum.StartCorner.TopLeft
+grid.Parent = scroll
+
+-- แถบเมนูด้านขวา
+local menu = Instance.new("Frame")
+menu.Size = UDim2.new(0, 100, 0, 200)
+menu.Position = UDim2.new(0.73, 0, 0.18, 0)
+menu.BackgroundTransparency = 1
+menu.Parent = main
+local mList = Instance.new("UIListLayout")
+mList.Padding = UDim.new(0, 8)
+mList.Parent = menu
+
+local function createMenuBtn(txt, color)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 35)
+    btn.BackgroundColor3 = color
+    btn.Text = txt
+    btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 12
+    btn.Parent = menu
+    Instance.new("UICorner").Parent = btn
+    return btn
+end
+
+local btnEquipAll = createMenuBtn("ถือทั้งหมด", Color3.fromRGB(46, 204, 113))
+local btnHideMode = createMenuBtn("โหมดซ่อน: ปิด", Color3.fromRGB(60, 60, 60))
+local btnSwitch = createMenuBtn("ดูของที่ซ่อน", Color3.fromRGB(52, 152, 219))
+
+-- ระบบอัปเดตกระเป๋า
+local function update()
+    for _, v in pairs(scroll:GetChildren()) do
+        if v:IsA("TextButton") then v:Destroy() end
+    end
+    
+    local bp = player:FindFirstChild("Backpack")
+    local char = player.Character
+    if not bp then return end
+
+    local allTools = {}
+    local toolCounts = {}
+    
+    -- นับไอเทมทั้งหมดในกระเป๋าและตัวละคร
+    for _, tool in pairs(bp:GetChildren()) do
+        if tool:IsA("Tool") and not hiddenItems[tool.Name] then
+            toolCounts[tool.Name] = (toolCounts[tool.Name] or 0) + 1
+            if not allTools[tool.Name] then
+                allTools[tool.Name] = {
+                    name = tool.Name,
+                    inCharacter = false,
+                    count = 0
+                }
+            end
+        end
+    end
+    
+    if char then
+        for _, tool in pairs(char:GetChildren()) do
+            if tool:IsA("Tool") and not hiddenItems[tool.Name] then
+                toolCounts[tool.Name] = (toolCounts[tool.Name] or 0) + 1
+                if not allTools[tool.Name] then
+                    allTools[tool.Name] = {
+                        name = tool.Name,
+                        inCharacter = true,
+                        count = 0
+                    }
+                else
+                    allTools[tool.Name].inCharacter = true
+                end
+            end
+        end
+    end
+    
+    -- อัปเดตจำนวนไอเทม
+    for toolName, data in pairs(allTools) do
+        data.count = toolCounts[toolName] or 1
+    end
+    
+    -- แสดงไอเทม (เรียงตามชื่อ)
+    local sortedTools = {}
+    for _, data in pairs(allTools) do
+        table.insert(sortedTools, data)
+    end
+    table.sort(sortedTools, function(a, b)
+        if a.inCharacter and not b.inCharacter then
+            return true
+        elseif not a.inCharacter and b.inCharacter then
+            return false
+        else
+            return a.name < b.name
+        end
+    end)
+    
+    local itemCount = 0
+    for _, data in pairs(sortedTools) do
+        local b = Instance.new("TextButton")
+        b.Name = data.name
+        b.BackgroundColor3 = data.inCharacter and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(40, 40, 40)
+        b.Text = data.name .. (data.count > 1 and (" ("..data.count..")") or "")
+        b.TextColor3 = Color3.new(1,1,1)
+        b.TextSize = 10
+        b.TextWrapped = true
+        b.Parent = scroll
+        Instance.new("UICorner").Parent = b
+
+        if isHideMode and not viewingHidden then
+            local x = Instance.new("TextButton")
+            x.Size = UDim2.new(0, 20, 0, 20)
+            x.Position = UDim2.new(1, -22, 0, 2)
+            x.Text = "X"
+            x.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+            x.Parent = b
+            Instance.new("UICorner").Parent = x
+            x.MouseButton1Click:Connect(function()
+                hiddenItems[data.name] = true
+                update()
+            end)
+        elseif viewingHidden then
+            b.Text = "[กู้คืน]\n"..data.name
+            b.MouseButton1Click:Connect(function()
+                hiddenItems[data.name] = nil
+                update()
+            end)
+        else
+            b.MouseButton1Click:Connect(function()
+                if not isHideMode then
+                    local char = player.Character
+                    if not char then return end
+                    
+                    -- ถ้าไอเทมอยู่ในตัวละคร -> ย้ายทั้งหมดไปกระเป๋า
+                    -- ถ้าไอเทมอยู่ในกระเป๋า -> ย้ายทั้งหมดมาในตัวละคร
+                    local moveToBackpack = data.inCharacter
+                    
+                    -- ค้นหาและย้ายไอเทมทั้งหมด
+                    if moveToBackpack then
+                        -- หาไอเทมในตัวละคร
+                        for _, tool in pairs(char:GetChildren()) do
+                            if tool:IsA("Tool") and tool.Name == data.name then
+                                tool.Parent = bp
+                            end
+                        end
+                    else
+                        -- หาไอเทมในกระเป๋า
+                        for _, tool in pairs(bp:GetChildren()) do
+                            if tool:IsA("Tool") and tool.Name == data.name then
+                                tool.Parent = char
+                            end
+                        end
+                    end
+                    
+                    -- รอสักครู่แล้วอัปเดต
+                    task.wait(0.1)
+                    update()
+                end
+            end)
+        end
+        itemCount = itemCount + 1
+    end
+    
+    -- อัปเดต CanvasSize
+    local rows = math.ceil(itemCount / 4)
+    scroll.CanvasSize = UDim2.new(0, 0, 0, rows * 80)
+end
+
+-- Event Listeners
+toggle.MouseButton1Click:Connect(function()
+    main.Visible = not main.Visible
+    if main.Visible then update() end
+end)
+
+btnEquipAll.MouseButton1Click:Connect(function()
+    local bp = player:FindFirstChild("Backpack")
+    local char = player.Character
+    if bp and char then
+        for _, t in pairs(bp:GetChildren()) do
+            if t:IsA("Tool") and not hiddenItems[t.Name] then
+                t.Parent = char
+            end
+        end
+        task.wait(0.1)
+        update()
+    end
+end)
+
+btnHideMode.MouseButton1Click:Connect(function()
+    isHideMode = not isHideMode
+    btnHideMode.Text = isHideMode and "โหมดซ่อน: เปิด" or "โหมดซ่อน: ปิด"
+    btnHideMode.BackgroundColor3 = isHideMode and Color3.fromRGB(231, 76, 60) or Color3.fromRGB(60, 60, 60)
+    update()
+end)
+
+btnSwitch.MouseButton1Click:Connect(function()
+    viewingHidden = not viewingHidden
+    title.Text = viewingHidden and "ของที่ซ่อน" or "สคริปถือของ"
+    btnSwitch.Text = viewingHidden and "กลับไปหน้าแรก" or "ดูของที่ซ่อน"
+    update()
+end)
+
+-- ตรวจสอบเมื่อของในตัวเปลี่ยน
+task.spawn(function()
+    while task.wait(1) do
+        if main.Visible then update() end
+    end
+end)
+
+print("Inventory Script Loaded!")
