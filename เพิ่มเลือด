@@ -1,0 +1,131 @@
+-- Services
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+
+-- Remote ใหม่ (Trinity Drink)
+local Remote = function()
+    local char = player.Character or player.CharacterAdded:Wait()
+    return char:WaitForChild("Trinity"):WaitForChild("Drink")
+end
+
+-- ================= GUI หลัก =================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "EarthGUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- Frame หลัก
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.fromOffset(200, 60)
+Frame.Position = UDim2.fromScale(0.5, 0.5)
+Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+Frame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+Frame.Parent = ScreenGui
+Frame.Active = true
+
+-- ระบบลาก
+do
+    local dragging, dragStart, startPos
+
+    Frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = Frame.Position
+        end
+    end)
+
+    UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            Frame.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+
+    UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+-- ปุ่มครั้งเดียว
+local OnceBtn = Instance.new("TextButton")
+OnceBtn.Size = UDim2.fromOffset(90, 40)
+OnceBtn.Position = UDim2.fromOffset(5, 10)
+OnceBtn.Text = "กดครั้งเดียว"
+OnceBtn.TextSize = 12
+OnceBtn.BackgroundColor3 = Color3.fromRGB(70,130,180)
+OnceBtn.TextColor3 = Color3.new(1,1,1)
+OnceBtn.Parent = Frame
+
+-- ปุ่มรันรัว
+local ToggleRunBtn = Instance.new("TextButton")
+ToggleRunBtn.Size = UDim2.fromOffset(90, 40)
+ToggleRunBtn.Position = UDim2.fromOffset(105, 10)
+ToggleRunBtn.Text = "ปิด"
+ToggleRunBtn.TextSize = 12
+ToggleRunBtn.BackgroundColor3 = Color3.fromRGB(180,70,70)
+ToggleRunBtn.TextColor3 = Color3.new(1,1,1)
+ToggleRunBtn.Parent = Frame
+
+-- ปุ่มเปิด/ปิด GUI
+local GuiToggleBtn = Instance.new("TextButton")
+GuiToggleBtn.Size = UDim2.fromOffset(90, 30)
+GuiToggleBtn.Position = UDim2.fromScale(0.05, 0.8)
+GuiToggleBtn.Text = "GUI"
+GuiToggleBtn.TextSize = 14
+GuiToggleBtn.BackgroundColor3 = Color3.fromRGB(60,60,60)
+GuiToggleBtn.TextColor3 = Color3.new(1,1,1)
+GuiToggleBtn.Parent = ScreenGui
+GuiToggleBtn.Active = true
+GuiToggleBtn.Draggable = true
+
+-- ================= การทำงาน =================
+
+-- กดครั้งเดียว (10 ครั้ง)
+OnceBtn.MouseButton1Click:Connect(function()
+    for i = 1, 10 do
+        task.spawn(function()
+            Remote():FireServer(player)
+        end)
+    end
+end)
+
+-- เปิด/ปิดรัว
+local running = false
+
+ToggleRunBtn.MouseButton1Click:Connect(function()
+    running = not running
+    ToggleRunBtn.Text = running and "เปิด" or "ปิด"
+    ToggleRunBtn.BackgroundColor3 = running
+        and Color3.fromRGB(70,180,70)
+        or Color3.fromRGB(180,70,70)
+
+    if running then
+        task.spawn(function()
+            while running do
+                for i = 1, 30 do
+                    task.spawn(function()
+                        Remote():FireServer(player)
+                    end)
+                end
+                task.wait(0.05)
+            end
+        end)
+    end
+end)
+
+-- ปุ่มซ่อน/โชว์ GUI
+GuiToggleBtn.MouseButton1Click:Connect(function()
+    Frame.Visible = not Frame.Visible
+end)
