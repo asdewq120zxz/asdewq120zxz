@@ -1,71 +1,450 @@
---[[
- .____                  ________ ___.    _____                           __                
- |    |    __ _______   \_____  \\_ |___/ ____\_ __  ______ ____ _____ _/  |_  ___________ 
- |    |   |  |  \__  \   /   |   \| __ \   __\  |  \/  ___// ___\\__  \\   __\/  _ \_  __ \
- |    |___|  |  // __ \_/    |    \ \_\ \  | |  |  /\___ \\  \___ / __ \|  | (  <_> )  | \/
- |_______ \____/(____  /\_______  /___  /__| |____//____  >\___  >____  /__|  \____/|__|   
-         \/          \/         \/    \/                \/     \/     \/                   
-          \_Welcome to LuaObfuscator.com   (Alpha 0.10.9) ~  Much Love, Ferib 
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
 
-]]--
+-- Default Settings
+local SPIN_SPEED = 2.4
+local TARGET_DISTANCE = 5
+local LOCK_RANGE = 40
+local SPIN_IMMEDIATE_DISTANCE = 12
 
--- Example Code:
-local a = ((16164 + (((3864 + 364101) - 274396) - 67600)) + (190952 - 110638))
-a = a + ((113 - (26 + 67)) + (1219 - (119 + 997))) -- Example obfuscation
+-- Animation
+local ANIMATION_ID = 10480796021
 
--- To hide your precious values, try obfuscating them!
--- Click the [Literals] button in the upper-right corner
-local b = 1203456
-local c = 1230471
-local d = 8023481
+-- ตัวแปรเก็บอ้างอิง
+local Character
+local HumanoidRootPart
+local CurrentAnimation
+local IsButtonLocked = false
 
--- The below if-statement is opque and can be predicted as
--- all conditions are staticly defined
-if c > b then
-    print("true")
+-- อัพเดท Character เมื่อเกิดเหตุการณ์
+local function updateCharacter()
+    Character = LocalPlayer.Character
+    if Character then
+        HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+        
+        local humanoid = Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.Died:Connect(function()
+                if CurrentAnimation then
+                    CurrentAnimation:Stop()
+                    CurrentAnimation = nil
+                end
+            end)
+        end
+    end
 end
 
--- You may want to obfuscate such if-statements by using
--- the [Junk-If] button in the upper right corner
-if 1 + d > c then
-    print("obfuscate the conditions!")
+-- ลบ GUI เก่าหากมีอยู่
+if game.CoreGui:FindFirstChild("LoopDashGUI") then
+    game.CoreGui:FindFirstChild("LoopDashGUI"):Destroy()
+end
+if game.CoreGui:FindFirstChild("SettingsGUI") then
+    game.CoreGui:FindFirstChild("SettingsGUI"):Destroy()
 end
 
--- Next is [Strings], which will encrypt all strings but adds
--- extra code to decrypt them at runtime.
-print("Clicking [Strings] will completely hide this string!")
+-- GUI
+local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
+ScreenGui.Name = "LoopDashGUI"
 
--- Another important thing is to hide the order of things that get executed
--- to confuse an attacker using Control Flow Flattening. With [CFF v1] we can hide
--- the control flow of the following blocks.
-do
-   function sieve_of_eratosthenes(n)
-   local is_prime = { }
-       for i = 1, n do
-           is_prime[i] = 1 ~= i
-       end
-       for i = 2, math.floor(math.sqrt(n)) do
-           if is_prime[i] then
-               for j = i* i, n, i do
-                   is_prime[j] = false
-               end
-           end
-       end
-       return is_prime
-   end
-   local primes = sieve_of_eratosthenes(420)
-   for key, value in pairs(primes) do
-       if (value) then
-           print("Prime found: " .. key)
-       end
-   end
+-- ปุ่มวงกลมใหญ่
+local LoopDashButton = Instance.new("TextButton", ScreenGui)
+LoopDashButton.Size = UDim2.new(0, 70, 0, 70)
+LoopDashButton.Position = UDim2.new(0, 10, 0, 10)
+LoopDashButton.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+LoopDashButton.TextColor3 = Color3.new(1,1,1)
+LoopDashButton.Text = "แดช"
+LoopDashButton.Font = Enum.Font.GothamBold
+LoopDashButton.TextSize = 18
+LoopDashButton.BorderSizePixel = 0
+LoopDashButton.Active = true
+LoopDashButton.Draggable = true
+
+-- ทำให้ปุ่มเป็นวงกลม
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(1, 0)
+corner.Parent = LoopDashButton
+
+-- เพิ่มเงาให้ปุ่ม
+local shadow = Instance.new("UIStroke")
+shadow.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+shadow.Color = Color3.fromRGB(255, 255, 255)
+shadow.Transparency = 0.8
+shadow.Thickness = 1
+shadow.Parent = LoopDashButton
+
+-- ⚙ Settings Window
+local SettingsGui = Instance.new("ScreenGui", game.CoreGui)
+SettingsGui.Name = "SettingsGUI"
+
+local SettingsFrame = Instance.new("Frame", SettingsGui)
+SettingsFrame.Size = UDim2.new(0, 280, 0, 380)
+SettingsFrame.Position = UDim2.new(0, 140, 0, 10)
+SettingsFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+SettingsFrame.BackgroundTransparency = 0.1
+SettingsFrame.BorderSizePixel = 0
+SettingsFrame.Visible = false
+SettingsFrame.ClipsDescendants = true
+
+-- ทำให้หน้าต่างตั้งค่าโปร่งใสและมีมุมโค้ง
+local frameCorner = Instance.new("UICorner")
+frameCorner.CornerRadius = UDim.new(0, 12)
+frameCorner.Parent = SettingsFrame
+
+local frameShadow = Instance.new("UIStroke")
+frameShadow.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+frameShadow.Color = Color3.fromRGB(100, 100, 255)
+frameShadow.Transparency = 0.3
+frameShadow.Thickness = 2
+frameShadow.Parent = SettingsFrame
+
+-- หัวข้อหน้าต่างตั้งค่า
+local title = Instance.new("TextLabel", SettingsFrame)
+title.Size = UDim2.new(0, 260, 0, 40)
+title.Position = UDim2.new(0, 10, 0, 10)
+title.BackgroundTransparency = 1
+title.Text = "ตั้งค่า ปุ่มแดช"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 18
+title.TextXAlignment = Enum.TextXAlignment.Center
+
+local titleLine = Instance.new("Frame", SettingsFrame)
+titleLine.Size = UDim2.new(0, 240, 0, 1)
+titleLine.Position = UDim2.new(0, 20, 0, 55)
+titleLine.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+titleLine.BorderSizePixel = 0
+
+local SettingsButton = Instance.new("TextButton", ScreenGui)
+SettingsButton.Size = UDim2.new(0, 40, 0, 40)
+SettingsButton.Position = UDim2.new(0, 85, 0, 10)
+SettingsButton.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+SettingsButton.BackgroundTransparency = 0.1
+SettingsButton.TextColor3 = Color3.new(1,1,1)
+SettingsButton.Text = "⚙"
+SettingsButton.Font = Enum.Font.GothamBold
+SettingsButton.TextSize = 20
+SettingsButton.BorderSizePixel = 0
+
+-- ทำให้ปุ่มตั้งค่าเป็นวงกลม
+local corner2 = Instance.new("UICorner")
+corner2.CornerRadius = UDim.new(1, 0)
+corner2.Parent = SettingsButton
+
+local settingsShadow = Instance.new("UIStroke")
+settingsShadow.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+settingsShadow.Color = Color3.fromRGB(255, 255, 255)
+settingsShadow.Transparency = 0.8
+settingsShadow.Thickness = 1
+settingsShadow.Parent = SettingsButton
+
+-- Container สำหรับช่องตั้งค่า (ป้องกันการเลื่อน)
+local SettingsContainer = Instance.new("ScrollingFrame", SettingsFrame)
+SettingsContainer.Size = UDim2.new(1, -20, 1, -120)
+SettingsContainer.Position = UDim2.new(0, 10, 0, 60)
+SettingsContainer.BackgroundTransparency = 1
+SettingsContainer.ScrollBarThickness = 4
+SettingsContainer.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 255)
+SettingsContainer.CanvasSize = UDim2.new(0, 0, 0, 350)
+SettingsContainer.ClipsDescendants = true
+
+-- Setting creator แบบใหม่ (ทำงานอัตโนมัติ)
+local function createAutoSetting(parent, yPos, text, default, callback)
+    local frame = Instance.new("Frame", parent)
+    frame.Size = UDim2.new(0, 260, 0, 40) -- ลดความสูงให้กะทัดรัด
+    frame.Position = UDim2.new(0, 0, 0, yPos)
+    frame.BackgroundTransparency = 1
+    
+    local label = Instance.new("TextLabel", frame)
+    label.Size = UDim2.new(0, 150, 0, 25)
+    label.Position = UDim2.new(0, 0, 0, 5) -- ปรับให้อยู่กลางแนวตั้ง
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 14
+    label.TextXAlignment = Enum.TextXAlignment.Left
+
+    local box = Instance.new("TextBox", frame)
+    box.Size = UDim2.new(0, 80, 0, 30)
+    box.Position = UDim2.new(0, 170, 0, 5) -- อยู่แนวเดียวกันกับข้อความ
+    box.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    box.BackgroundTransparency = 0.2
+    box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    box.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+    box.Text = tostring(default)
+    box.PlaceholderText = "ค่า..."
+    box.Font = Enum.Font.Gotham
+    box.TextSize = 14
+    
+    -- ทำให้ช่องพิมพ์มีมุมโค้ง
+    local boxCorner = Instance.new("UICorner")
+    boxCorner.CornerRadius = UDim.new(0, 8)
+    boxCorner.Parent = box
+    
+    local boxStroke = Instance.new("UIStroke")
+    boxStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    boxStroke.Color = Color3.fromRGB(100, 100, 255)
+    boxStroke.Transparency = 0.5
+    boxStroke.Thickness = 1
+    boxStroke.Parent = box
+    
+    -- ทำงานอัตโนมัติเมื่อกด Enter หรือFocusLost
+    box.FocusLost:Connect(function()
+        callback(box.Text)
+    end)
+    
+    box:GetPropertyChangedSignal("Text"):Connect(function()
+        if box:IsFocused() then
+            local num = tonumber(box.Text)
+            if num then
+                callback(num)
+            end
+        end
+    end)
+    
+    return box
 end
 
--- You might be satisfied with your result, but before sharing your work you should
--- use [Minify] (under Miscellaneous) to destroy all local variables and comments.
--- Please note that some pre-configured obfuscate buttons already do this for you ;)
-print("How to obfuscate best?")
+-- สร้างช่องตั้งค่าแบบอัตโนมัติ
+local yPosition = 0
+local ButtonSizeBox = createAutoSetting(SettingsContainer, yPosition, "ขนาดปุ่มแดช", 70, function(value)
+    local num = tonumber(value)
+    if num and num >= 50 and num <= 150 then
+        LoopDashButton.Size = UDim2.new(0, num, 0, num)
+    end
+end)
 
--- The highest level of obfuscation is done through virtualization,
--- in our case this means we will be running Lua inside Lua using the
--- Ironbrew2 virtulization tool. Ready? click [Demo VM] and see what happens!
+yPosition = yPosition + 45
+local SpeedBox = createAutoSetting(SettingsContainer, yPosition, "ความเร็ว", SPIN_SPEED, function(value)
+    local num = tonumber(value)
+    if num and num >= 0.1 and num <= 10 then
+        SPIN_SPEED = num
+    end
+end)
+
+yPosition = yPosition + 45
+local DistanceBox = createAutoSetting(SettingsContainer, yPosition, "ระยะห่าง", TARGET_DISTANCE, function(value)
+    local num = tonumber(value)
+    if num and num >= 1 and num <= 20 then
+        TARGET_DISTANCE = num
+    end
+end)
+
+yPosition = yPosition + 45
+local LockBox = createAutoSetting(SettingsContainer, yPosition, "ล็อกระยะ", LOCK_RANGE, function(value)
+    local num = tonumber(value)
+    if num and num >= 10 and num <= 100 then
+        LOCK_RANGE = num
+    end
+end)
+
+yPosition = yPosition + 45
+local ImSpinBox = createAutoSetting(SettingsContainer, yPosition, "หมุนทันที ≤ เมตร", SPIN_IMMEDIATE_DISTANCE, function(value)
+    local num = tonumber(value)
+    if num and num >= 1 and num <= 50 then
+        SPIN_IMMEDIATE_DISTANCE = num
+    end
+end)
+
+-- ปุ่มล็อกปุ่มแดชแบบใหม่ (อยู่นอก ScrollingFrame)
+local LockButton = Instance.new("TextButton", SettingsFrame)
+LockButton.Size = UDim2.new(0, 240, 0, 35)
+LockButton.Position = UDim2.new(0, 20, 0, 325)
+LockButton.BackgroundColor3 = Color3.fromRGB(200, 100, 100)
+LockButton.BackgroundTransparency = 0.1
+LockButton.TextColor3 = Color3.new(1,1,1)
+LockButton.Text = "🔓 ล็อกปุ่ม"
+LockButton.Font = Enum.Font.GothamBold
+LockButton.TextSize = 14
+LockButton.BorderSizePixel = 0
+
+local lockCorner = Instance.new("UICorner")
+lockCorner.CornerRadius = UDim.new(0, 8)
+lockCorner.Parent = LockButton
+
+local lockShadow = Instance.new("UIStroke")
+lockShadow.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+lockShadow.Color = Color3.fromRGB(255, 255, 255)
+lockShadow.Transparency = 0.7
+lockShadow.Thickness = 1
+lockShadow.Parent = LockButton
+
+-- ฟังก์ชันอัพเดทปุ่มล็อก
+local function updateLockButton()
+    if IsButtonLocked then
+        LockButton.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+        LockButton.Text = "🔒 ปลดล็อก"
+        LoopDashButton.Draggable = false
+    else
+        LockButton.BackgroundColor3 = Color3.fromRGB(200, 100, 100)
+        LockButton.Text = "🔓 ล็อกปุ่ม"
+        LoopDashButton.Draggable = true
+    end
+end
+
+-- ฟังก์ชันเปิด/ปิดหน้าต่างตั้งค่า
+local function toggleSettings()
+    SettingsFrame.Visible = not SettingsFrame.Visible
+end
+
+-- 🔍 หาเป้าหมายที่ใกล้ที่สุด
+local function GetClosestTarget()
+    if not Character or not HumanoidRootPart then return nil end
+    
+    local hrp = HumanoidRootPart
+    if not hrp then return nil end
+
+    local closest, shortest = nil, LOCK_RANGE
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") and obj ~= Character then
+            local hum = obj:FindFirstChildOfClass("Humanoid")
+            local tHrp = obj:FindFirstChild("HumanoidRootPart")
+
+            if hum and hum.Health > 0 and tHrp then
+                local dist = (hrp.Position - tHrp.Position).Magnitude
+                if dist < shortest then
+                    shortest = dist
+                    closest = tHrp
+                end
+            end
+        end
+    end
+    return closest, shortest
+end
+
+-- ฟังก์ชันใช้ Dash
+local function UseDash()
+    local args = {
+        [1] = {
+            ["Dash"] = Enum.KeyCode.A,
+            ["Key"] = Enum.KeyCode.Q,
+            ["Goal"] = "KeyPress"
+        }
+    }
+    if Character and Character:FindFirstChild("Communicate") then
+        Character.Communicate:FireServer(unpack(args))
+    end
+end
+
+-- ⭐ ระบบ Dash + หมุนรอบศัตรู
+local function PerformLoopDash()  
+    if not Character or not HumanoidRootPart then
+        updateCharacter()
+        if not Character then return end
+    end
+    
+    local humanoid = Character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return end
+
+    local startHealth = humanoid.Health
+
+    local target, dist = GetClosestTarget()
+    if not target then 
+        warn("ไม่พบเป้าหมายในระยะ")
+        return 
+    end
+
+    local pos = HumanoidRootPart.Position
+    local dir = (target.Position - pos).Unit
+    local endPos = target.Position - dir * TARGET_DISTANCE
+
+    local doDash = dist > SPIN_IMMEDIATE_DISTANCE
+
+    -- ใช้ Dash เมื่อต้องพุ่ง
+    if doDash then
+        UseDash()
+        task.wait(0.05)
+    end
+
+    -- เล่นอนิเมชั่น
+    if humanoid then
+        local anim = Instance.new("Animation")
+        anim.AnimationId = "rbxassetid://" .. ANIMATION_ID
+        CurrentAnimation = humanoid:LoadAnimation(anim)
+        CurrentAnimation:Play()
+    end
+
+    -- ใช้ Dash เมื่อหมุนทันทีด้วย (เพิ่มส่วนนี้)
+    if not doDash then
+        UseDash()
+        task.wait(0.05)
+    end
+
+    local dashSpeedMultiplier = 1.5
+    local travelTime = (pos - endPos).Magnitude / (SPIN_SPEED * 10 * dashSpeedMultiplier)
+    local startTime = tick()
+    local currentSpin = 0
+    local totalSpin = 370
+
+    local conn
+    conn = RunService.Heartbeat:Connect(function(dt)
+        if not Character or not HumanoidRootPart or not humanoid or humanoid.Health <= 0 then
+            if conn then conn:Disconnect() end
+            return
+        end
+
+        if not target or not target.Parent then
+            if conn then conn:Disconnect() end
+            return
+        end
+
+        if humanoid.Health < startHealth then
+            if conn then conn:Disconnect() end
+            return
+        end
+
+        if doDash then
+            local t = math.min((tick() - startTime) / travelTime, 1)
+            local easedT = t < 0.5 and 2 * t * t or 1 - math.pow(-2 * t + 2, 2) / 2
+            local p = pos + (endPos - pos) * easedT
+            HumanoidRootPart.CFrame = CFrame.new(p, target.Position)
+            
+            if t >= 0.8 then
+                doDash = false
+            end
+        end
+
+        if (doDash and tick() - startTime >= travelTime * 0.2) or not doDash then
+            currentSpin = currentSpin + dt * (totalSpin * SPIN_SPEED * 1.2)
+            local angle = math.rad(currentSpin)
+
+            local orbitX = target.Position.X + TARGET_DISTANCE * math.cos(angle)
+            local orbitZ = target.Position.Z + TARGET_DISTANCE * math.sin(angle)
+            local orbitPos = Vector3.new(orbitX, target.Position.Y, orbitZ)
+
+            HumanoidRootPart.CFrame = CFrame.new(orbitPos, target.Position)
+        end
+
+        if currentSpin >= totalSpin then
+            if HumanoidRootPart then
+                HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position, target.Position)
+            end
+            if conn then conn:Disconnect() end
+            if CurrentAnimation then
+                CurrentAnimation:Stop()
+                CurrentAnimation = nil
+            end
+        end
+    end)
+end
+
+-- 🔘 GUI Events
+SettingsButton.MouseButton1Click:Connect(toggleSettings)
+
+LockButton.MouseButton1Click:Connect(function()
+    IsButtonLocked = not IsButtonLocked
+    updateLockButton()
+end)
+
+LoopDashButton.MouseButton1Click:Connect(function()
+    pcall(PerformLoopDash)
+end)
+
+-- อัพเดทปุ่มล็อกครั้งแรก
+updateLockButton()
+
+-- ตั้งค่า Character เริ่มต้น
+updateCharacter()
+LocalPlayer.CharacterAdded:Connect(updateCharacter)
