@@ -522,7 +522,10 @@ _modules["Window"] = (function()
                 Utils.tween(btnTgl, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = 1})
                 Utils.tween(bs1, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Transparency = 1})
                 Utils.tween(lblTitleTgl, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 1})
-                task.delay(0.2, function() btnTgl.Visible = false end)
+                -- แก้ไขแล้ว: ไม่ซ่อนปุ่ม 🐱
+                -- task.delay(0.2, function() btnTgl.Visible = false end)
+                btnTgl.Visible = true
+                btnTgl.BackgroundTransparency = 0.15
                 
                 openWindow()
                 task.wait(0.3)
