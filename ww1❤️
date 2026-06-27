@@ -1,0 +1,765 @@
+--[[
+    ================================================================================
+    สคริปต์ของคิมมี่
+    ================================================================================
+    Developed by NMZ Team (c) 2026
+    ================================================================================
+--]]
+
+-- ==================== ปิดทุกอย่างเป็นค่าเริ่มต้น ====================
+local isExecutorSupported = true
+if type(hookfunction) ~= "function" then
+    isExecutorSupported = false
+end
+
+local cloneref = cloneref or function(i: Instance) return i; end;
+local clonefunction = clonefunction or function(f: (...any) -> (...any)) return f; end;
+local newcclosure = newcclosure or clonefunction;
+local hookfunction = hookfunction or function(old, new) return old end;
+local gethui = gethui or function()
+    local success, coregui = pcall(game.GetService, game, "CoreGui")
+    return success and coregui or nil
+end;
+
+local parentGui = (gethui and gethui()) or cloneref(game:GetService("CoreGui")) or game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+
+local Players = cloneref(game:GetService("Players"))
+local UserInputService = cloneref(game:GetService("UserInputService"))
+local RunService = cloneref(game:GetService("RunService"))
+local TeleportService = cloneref(game:GetService("TeleportService"))
+local TweenService = cloneref(game:GetService("TweenService"))
+local VirtualUser = cloneref(game:GetService("VirtualUser"))
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+
+if getconnections then
+    for _, conn in pairs(getconnections(game:GetService("ScriptContext").Error)) do
+        if type(conn) == "table" and conn.Disable then pcall(conn.Disable, conn) end
+    end
+    for _, conn in pairs(getconnections(game:GetService("LogService").MessageOut)) do
+        if type(conn) == "table" and conn.Disable then pcall(conn.Disable, conn) end
+    end
+end
+
+local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
+
+-- ==================== ปิดทุกอย่างเป็นค่าเริ่มต้น ====================
+local noRecoilEnabled = false
+local noSpreadEnabled = false
+local fastBoltEnabled = false
+local silentReloadEnabled = false
+local espEnabled = false
+local espMode = "Highlight"
+local boxColor = Color3.new(1,1,1)
+local boxColorIndex = 1
+local boxColors = {
+    Color3.new(1,1,1), Color3.new(1,0,0), Color3.new(0,1,0),
+    Color3.new(0,0,1), Color3.new(1,1,0), Color3.new(1,0,1),
+    Color3.new(0,1,1)
+}
+local boxColorNames = {"ขาว","แดง","เขียว","น้ำเงิน","เหลือง","ชมพู","ฟ้า"}
+local hitboxEnabled = false
+local hitboxMultiplier = 2.0
+local headMultiplier = 6.0
+local originalSizes = {}
+local antiAfkEnabled = false
+local antiAfkConnection = nil
+local noParticlesEnabled = false
+local particleConnection = nil
+local fullBrightEnabled = false
+local fullBrightConnection = nil
+local noclipEnabled = false
+local removeCorpseEnabled = false
+
+local recoilThread = nil
+local currentVelocity = nil
+local currentTool = nil
+local reloadConn = nil
+local scriptUnloadedLocal = false
+
+-- ==================== ระบบ Noclip ====================
+local noclipConnection = nil
+local function toggleNoclip()
+    if noclipEnabled then
+        if not noclipConnection then
+            noclipConnection = RunService.Stepped:Connect(function()
+                local char = LocalPlayer.Character
+                if char then
+                    for _, part in pairs(char:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+                end
+            end)
+        end
+    else
+        if noclipConnection then
+            noclipConnection:Disconnect()
+            noclipConnection = nil
+            local char = LocalPlayer.Character
+            if char then
+                for _, part in pairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = true
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ==================== ระบบลบศพ ====================
+local corpseConnection = nil
+local function toggleRemoveCorpse()
+    if removeCorpseEnabled then
+        if not corpseConnection then
+            -- ลบศพที่มีอยู่แล้ว
+            for _, plr in pairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer and plr.Character then
+                    local humanoid = plr.Character:FindFirstChildOfClass("Humanoid")
+                    if humanoid and humanoid.Health <= 0 then
+                        pcall(function()
+                            plr.Character:Destroy()
+                        end)
+                    end
+                end
+            end
+            
+            -- เช็คเมื่อมีตัวละครใหม่หรือมนุษย์เปลี่ยนค่าสุขภาพ
+            corpseConnection = RunService.Stepped:Connect(function()
+                for _, plr in pairs(Players:GetPlayers()) do
+                    if plr ~= LocalPlayer and plr.Character then
+                        local humanoid = plr.Character:FindFirstChildOfClass("Humanoid")
+                        if humanoid and humanoid.Health <= 0 then
+                            pcall(function()
+                                plr.Character:Destroy()
+                            end)
+                        end
+                    end
+                end
+            end)
+        end
+    else
+        if corpseConnection then
+            corpseConnection:Disconnect()
+            corpseConnection = nil
+        end
+    end
+end
+
+-- ==================== ระบบโหลด Weapon Module ====================
+local success, wm = pcall(require, ReplicatedStorage:WaitForChild("WeaponModule", 5))
+if success and wm and type(wm) == "table" then
+    if not getgenv().NMZ_Originals then
+        getgenv().NMZ_Originals = {
+            Equip = rawget(wm, "Equip"),
+            Cycle = rawget(wm, "Cycle"),
+            boltCycleAction = rawget(wm, "boltCycleAction"),
+            Reload = rawget(wm, "Reload"),
+            Shoot = rawget(wm, "Shoot")
+        }
+    end
+
+    if getgenv().NMZ_Originals.Equip then
+        local oldEquip = getgenv().NMZ_Originals.Equip
+        local newEquip = newcclosure(function(data, action)
+            pcall(function()
+                if recoilThread then coroutine.close(recoilThread); recoilThread = nil end
+                if reloadConn then reloadConn:Disconnect(); reloadConn = nil end
+
+                if type(action) == "string" and action == "Equip" and type(data) == "table" and data.Tool then
+                    currentTool = data.Tool
+                    currentVelocity = data.Tool:GetAttribute("Velocity") or 500
+
+                    if noRecoilEnabled then data.Tool:SetAttribute("Recoil", 0) end
+                    if noSpreadEnabled then
+                        data.Tool:SetAttribute("Spread", 0)
+                        data.Tool:SetAttribute("SpreadDefault", 99999999)
+                        data.Tool:SetAttribute("MinSpread", 0)
+                        data.Tool:SetAttribute("MaxSpread", 0)
+                    end
+                    
+                    recoilThread = task.spawn(function()
+                        while task.wait() do
+                            if scriptUnloadedLocal then break end
+                            if not data or not data.Tool or not data.Tool.Parent then break end
+                            
+                            pcall(function()
+                                if noRecoilEnabled and data.RecoilPattern then
+                                    table.clear(data.RecoilPattern)
+                                end
+                                if noSpreadEnabled and data.Tool then
+                                    data.Tool:SetAttribute("Spread", 0)
+                                    data.Tool:SetAttribute("SpreadDefault", 99999999) 
+                                    data.Tool:SetAttribute("MinSpread", 0)
+                                    data.Tool:SetAttribute("MaxSpread", 0)
+                                    local b = data.Tool:FindFirstChild("Bloom")
+                                    if b then b.Value = 0 end
+                                end
+                                if fastBoltEnabled then
+                                    pcall(function()
+                                        if data.animationList then
+                                            if data.animationList.boltCycleAnimation and data.animationList.boltCycleAnimation.IsPlaying then 
+                                                data.animationList.boltCycleAnimation:AdjustSpeed(20) 
+                                            end
+                                            if data.animationList.aimFireAnimation and data.animationList.aimFireAnimation.IsPlaying then 
+                                                data.animationList.aimFireAnimation:AdjustSpeed(20) 
+                                            end
+                                            if data.animationList.hipFireAnimation and data.animationList.hipFireAnimation.IsPlaying then 
+                                                data.animationList.hipFireAnimation:AdjustSpeed(20) 
+                                            end
+                                        end
+                                    end)
+                                end
+                            end)
+                        end
+                    end)
+                end
+            end)
+            return oldEquip(data, action)
+        end)
+        rawset(wm, "Equip", newEquip)
+    end
+
+    local targetName = rawget(wm, "boltCycleAction") and "boltCycleAction" or "Cycle"
+    if getgenv().NMZ_Originals[targetName] then
+        local oldCycle = getgenv().NMZ_Originals[targetName]
+        local newCycle = newcclosure(function(data, ...)
+            if fastBoltEnabled then
+                if type(data) == "table" then
+                    data.Cycle = false
+                    data.clientCanFire = true
+                    if data.animationList then
+                        if data.animationList.boltCycleAnimation then pcall(function() data.animationList.boltCycleAnimation:Stop() end) end
+                        if data.animationList.aimFireAnimation then pcall(function() data.animationList.aimFireAnimation:Stop() end) end
+                        if data.animationList.hipFireAnimation then pcall(function() data.animationList.hipFireAnimation:Stop() end) end
+                        if data.animationList.equipAnimation and not data.animationList.equipAnimation.IsPlaying then 
+                            pcall(function() data.animationList.equipAnimation:Play() end) 
+                        end
+                    end
+                end
+                return
+            end
+            return oldCycle(data, ...)
+        end)
+        rawset(wm, targetName, newCycle)
+    end
+
+    if getgenv().NMZ_Originals.Reload then
+        local oldReload = getgenv().NMZ_Originals.Reload
+        local newReload = newcclosure(function(data, ...)
+            if silentReloadEnabled then
+                if type(data) == "table" and data.Tool then
+                    task.spawn(function()
+                        pcall(function()
+                            local ServerEvents = ReplicatedStorage:FindFirstChild("ServerEvents")
+                            if ServerEvents and ServerEvents:FindFirstChild("Reload") then
+                                ServerEvents.Reload:InvokeServer(data)
+                            end
+                        end)
+                    end)
+                end
+                return
+            end
+            return oldReload(data, ...)
+        end)
+        rawset(wm, "Reload", newReload)
+    end
+
+    if getgenv().NMZ_Originals.Shoot then
+        local oldShoot = getgenv().NMZ_Originals.Shoot
+        local newShoot = newcclosure(function(data, ...)
+            if fastBoltEnabled and type(data) == "table" and data.Tool and data.Tool:GetAttribute("ToolType") == "Bolt Action" then
+                local toolName = data.Tool.Name
+                local delay = 1.3
+                if data.animationList and data.animationList.boltCycleAnimation then
+                    delay = data.animationList.boltCycleAnimation.Length
+                end
+                if not getgenv()._lastShotTime then getgenv()._lastShotTime = {} end
+                if getgenv()._lastShotTime[toolName] and tick() - getgenv()._lastShotTime[toolName] < delay then
+                    return
+                end
+                getgenv()._lastShotTime[toolName] = tick()
+            end
+            return oldShoot(data, ...)
+        end)
+        rawset(wm, "Shoot", newShoot)
+    end
+
+    LocalPlayer.CharacterAdded:Connect(function()
+        pcall(function()
+            if recoilThread then coroutine.close(recoilThread); recoilThread = nil end
+            if reloadConn then reloadConn:Disconnect(); reloadConn = nil end
+        end)
+    end)
+end
+
+-- ==================== ระบบ ESP ====================
+local boxLines = {}
+
+local function removeAllHighlights()
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr.Character then
+            local hl = plr.Character:FindFirstChildOfClass("Highlight")
+            if hl then hl:Destroy() end
+        end
+    end
+end
+
+local function removeAllBoxes()
+    for plr, lines in pairs(boxLines) do
+        for _, line in pairs(lines) do line:Remove() end
+    end
+    boxLines = {}
+end
+
+local function createHighlightForPlayer(plr)
+    if plr == LocalPlayer then return end
+    if not plr.Character then return end
+    local old = plr.Character:FindFirstChildOfClass("Highlight")
+    if old then old:Destroy() end
+    local hl = Instance.new("Highlight")
+    hl.Parent = plr.Character
+    hl.FillTransparency = 0.6
+    hl.OutlineTransparency = 0.2
+    if plr.Team == LocalPlayer.Team then
+        hl.FillColor = Color3.fromRGB(0,100,255)
+        hl.OutlineColor = Color3.fromRGB(0,200,255)
+    else
+        hl.FillColor = Color3.fromRGB(255,50,50)
+        hl.OutlineColor = Color3.fromRGB(255,150,150)
+    end
+end
+
+local function createBoxLinesForPlayer(plr)
+    if boxLines[plr] then return end
+    local lines = {}
+    for i=1,4 do
+        lines[i] = Drawing.new("Line")
+        lines[i].Thickness = 2
+        lines[i].Color = boxColor
+        lines[i].Visible = false
+    end
+    boxLines[plr] = lines
+end
+
+local function updateBoxes()
+    if not espEnabled or espMode ~= "Box" then
+        for _, lines in pairs(boxLines) do
+            for _, line in pairs(lines) do line.Visible = false end
+        end
+        return
+    end
+    for _, plr in pairs(Players:GetPlayers()) do
+        local isEnemy = plr ~= LocalPlayer and (not LocalPlayer.Team or plr.Team ~= LocalPlayer.Team)
+        if isEnemy and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChild("Head") then
+            createBoxLinesForPlayer(plr)
+            local root = plr.Character.HumanoidRootPart
+            local head = plr.Character.Head
+            local rPos, rVis = Camera:WorldToViewportPoint(root.Position)
+            local hPos, hVis = Camera:WorldToViewportPoint(head.Position)
+            if rVis and hVis then
+                local height = math.abs(hPos.Y - rPos.Y) * 2.2
+                local width = height * 0.7
+                local cx = rPos.X
+                local cy = (hPos.Y + rPos.Y)/2
+                local left = cx - width/2
+                local right = cx + width/2
+                local top = cy - height/2
+                local bottom = cy + height/2
+                local lines = boxLines[plr]
+                lines[1].From = Vector2.new(left, top); lines[1].To = Vector2.new(right, top)
+                lines[2].From = Vector2.new(right, top); lines[2].To = Vector2.new(right, bottom)
+                lines[3].From = Vector2.new(right, bottom); lines[3].To = Vector2.new(left, bottom)
+                lines[4].From = Vector2.new(left, bottom); lines[4].To = Vector2.new(left, top)
+                for _, line in pairs(lines) do line.Color = boxColor; line.Visible = true end
+            else
+                if boxLines[plr] then for _, line in pairs(boxLines[plr]) do line.Visible = false end end
+            end
+        else
+            if boxLines[plr] then for _, line in pairs(boxLines[plr]) do line.Visible = false end end
+        end
+    end
+end
+
+local function refreshESP()
+    if not espEnabled then
+        removeAllHighlights()
+        removeAllBoxes()
+        return
+    end
+    if espMode == "Highlight" then
+        removeAllBoxes()
+        for _, plr in pairs(Players:GetPlayers()) do
+            createHighlightForPlayer(plr)
+        end
+    else
+        removeAllHighlights()
+    end
+end
+
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(function()
+        task.wait(0.5)
+        if espEnabled and espMode == "Highlight" then
+            createHighlightForPlayer(plr)
+        end
+    end)
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+    if boxLines[plr] then
+        for _, line in pairs(boxLines[plr]) do line:Remove() end
+        boxLines[plr] = nil
+    end
+end)
+
+for _, plr in pairs(Players:GetPlayers()) do
+    if plr.Character then
+        plr.CharacterAdded:Connect(function()
+            task.wait(0.5)
+            if espEnabled and espMode == "Highlight" then
+                createHighlightForPlayer(plr)
+            end
+        end)
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    if espEnabled and espMode == "Highlight" then
+        for _, plr in pairs(Players:GetPlayers()) do
+            createHighlightForPlayer(plr)
+        end
+    end
+end)
+
+-- ==================== Hitbox ระบบ (หัวใหญ่เป็นพิเศษ) ====================
+local function applyHitboxToCharacter(character)
+    if not character then return end
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            if not originalSizes[part] then originalSizes[part] = part.Size end
+            
+            if part.Name == "Head" then
+                part.Size = originalSizes[part] * headMultiplier
+            else
+                part.Size = originalSizes[part] * hitboxMultiplier
+            end
+        end
+    end
+end
+
+local function restoreHitboxForCharacter(character)
+    if not character then return end
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") and originalSizes[part] then
+            part.Size = originalSizes[part]
+            originalSizes[part] = nil
+        end
+    end
+end
+
+local function applyHitboxToAll()
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Team ~= LocalPlayer.Team and plr.Character then 
+            applyHitboxToCharacter(plr.Character) 
+        end
+    end
+end
+
+local function restoreAllHitboxes()
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then restoreHitboxForCharacter(plr.Character) end
+    end
+    originalSizes = {}
+end
+
+local function onCharacterAdded(char)
+    task.wait(0.5)
+    if hitboxEnabled and char then 
+        local plr = Players:GetPlayerFromCharacter(char)
+        if plr and plr ~= LocalPlayer and plr.Team ~= LocalPlayer.Team then
+            applyHitboxToCharacter(char) 
+        end
+    end
+end
+
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(onCharacterAdded)
+    if plr.Character then onCharacterAdded(plr.Character) end
+end)
+
+for _, plr in pairs(Players:GetPlayers()) do
+    if plr ~= LocalPlayer and plr.Character then plr.CharacterAdded:Connect(onCharacterAdded) end
+end
+
+-- ==================== Anti-AFK ====================
+local function toggleAntiAfk()
+    if antiAfkEnabled then
+        if not antiAfkConnection then
+            antiAfkConnection = LocalPlayer.Idled:Connect(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+            end)
+        end
+    else
+        if antiAfkConnection then
+            antiAfkConnection:Disconnect()
+            antiAfkConnection = nil
+        end
+    end
+end
+
+-- ==================== Render Loop ====================
+RunService.RenderStepped:Connect(function()
+    if scriptUnloadedLocal then return end
+    updateBoxes()
+end)
+
+-- ==================== โหลด UI ====================
+local UI = loadstring(game:HttpGet("https://raw.githubusercontent.com/asdewq120zxz/asdewq120zxz/refs/heads/main/UI%20%E0%B8%82%E0%B8%AD%E0%B8%87%E0%B8%9C%E0%B8%A1"))()
+
+-- ==================== สร้างหน้าต่างหลัก ====================
+local Window = UI.CreateWindow({
+    Title = "สคริปต์ของคิมมี่",
+    ToggleText = "🐱",
+    Size = UDim2.new(0, 500, 0, 380),
+    Keybind = Enum.KeyCode.LeftAlt,
+    HideOnStartup = false
+})
+
+-- ==================== สร้าง Tabs ====================
+local TabESP = UI.CreateTab(Window, "ESP", 1)
+local TabGun = UI.CreateTab(Window, "ปรับปืน", 2)
+local TabHitbox = UI.CreateTab(Window, "ขยายตัว", 3)
+local TabVisuals = UI.CreateTab(Window, "ภาพ", 4)
+local TabMisc = UI.CreateTab(Window, "อื่นๆ", 5)
+
+-- ==================== Tab ESP ====================
+UI.CreateToggle(TabESP, "เปิด ESP", espEnabled, function(Value)
+    espEnabled = Value
+    refreshESP()
+end)
+
+UI.CreateDropdown(TabESP, "โหมด ESP", {{name="ไฮไลท์",val="Highlight"},{name="กล่อง",val="Box"}}, 1, function(Option)
+    espMode = Option
+    refreshESP()
+end)
+
+local colOpts = {}
+for i, name in ipairs(boxColorNames) do table.insert(colOpts, {name=name, val=name}) end
+UI.CreateDropdown(TabESP, "สี ESP", colOpts, 1, function(Option)
+    for i, n in ipairs(boxColorNames) do
+        if n == Option then
+            boxColorIndex = i
+            boxColor = boxColors[i]
+            for plr, lines in pairs(boxLines) do for _, l in pairs(lines) do l.Color = boxColor end end
+            break
+        end
+    end
+end)
+
+-- ==================== Tab Gun ====================
+UI.CreateLabel(TabGun, "⚠️ หมายเหตุ: อาจไม่เสถียรบนบาง Executor")
+UI.CreateToggle(TabGun, "ไม่มีแรงดีด", noRecoilEnabled, function(Value)
+    noRecoilEnabled = Value
+end)
+
+UI.CreateToggle(TabGun, "ไม่กระจายกระสุน", noSpreadEnabled, function(Value)
+    noSpreadEnabled = Value
+end)
+
+UI.CreateToggle(TabGun, "ยิงเร็ว (Bolt)", fastBoltEnabled, function(Value)
+    fastBoltEnabled = Value
+end)
+
+UI.CreateToggle(TabGun, "โหลดกระสุนอัตโนมัติ", silentReloadEnabled, function(Value)
+    silentReloadEnabled = Value
+end)
+
+-- ==================== Tab Hitbox ====================
+UI.CreateToggle(TabHitbox, "เปิดขยายตัว (เฉพาะศัตรู)", hitboxEnabled, function(Value)
+    hitboxEnabled = Value
+    if hitboxEnabled then applyHitboxToAll() else restoreAllHitboxes() end
+end)
+
+UI.CreateSlider(TabHitbox, "ขนาดตัว (ไม่รวมหัว)", 1, 3, hitboxMultiplier, function(v) return string.format("%.1f", v) end, function(Value)
+    hitboxMultiplier = Value
+    if hitboxEnabled then applyHitboxToAll() end
+end)
+
+UI.CreateSlider(TabHitbox, "ขนาดหัว (ใหญ่เป็นพิเศษ)", 1, 10, headMultiplier, function(v) return string.format("%.1f", v) end, function(Value)
+    headMultiplier = Value
+    if hitboxEnabled then applyHitboxToAll() end
+end)
+
+UI.CreateToggle(TabHitbox, "🔓 ทะลุตัวละคร (Noclip)", noclipEnabled, function(Value)
+    noclipEnabled = Value
+    toggleNoclip()
+end)
+
+UI.CreateToggle(TabHitbox, "🗑️ ลบศพ (เมื่อตาย)", removeCorpseEnabled, function(Value)
+    removeCorpseEnabled = Value
+    toggleRemoveCorpse()
+end)
+
+-- ==================== Tab Visuals ====================
+UI.CreateToggle(TabVisuals, "เปิดไฟสว่าง", fullBrightEnabled, function(Value)
+    fullBrightEnabled = Value
+    if fullBrightEnabled then
+        if not fullBrightConnection then
+            fullBrightConnection = RunService.RenderStepped:Connect(function()
+                local Lighting = game:GetService("Lighting")
+                Lighting.Ambient = Color3.new(1, 1, 1)
+                Lighting.ColorShift_Bottom = Color3.new(1, 1, 1)
+                Lighting.ColorShift_Top = Color3.new(1, 1, 1)
+                Lighting.GlobalShadows = false
+            end)
+        end
+    else
+        if fullBrightConnection then
+            fullBrightConnection:Disconnect()
+            fullBrightConnection = nil
+        end
+    end
+end)
+
+UI.CreateButton(TabVisuals, "เพิ่ม FPS (ลบเอฟเฟกต์)", function()
+    pcall(function()
+        local Lighting = game:GetService("Lighting")
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 9e9
+        Lighting.ShadowSoftness = 0
+        if sethiddenproperty then
+            pcall(sethiddenproperty, Lighting, "Technology", 2)
+        end
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v:IsA("BasePart") then
+                v.Material = Enum.Material.SmoothPlastic
+                v.Reflectance = 0
+                v.CastShadow = false
+            elseif v:IsA("Decal") or v:IsA("Texture") then
+                v.Transparency = 1
+            elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then
+                v.Lifetime = NumberRange.new(0)
+            end
+        end
+        local Terrain = game:GetService("Workspace").Terrain
+        Terrain.WaterWaveSize = 0
+        Terrain.WaterWaveSpeed = 0
+        Terrain.WaterReflectance = 0
+        Terrain.WaterTransparency = 0
+    end)
+end)
+
+UI.CreateToggle(TabVisuals, "ลบอนุภาค (ลดแลค)", noParticlesEnabled, function(Value)
+    noParticlesEnabled = Value
+    if noParticlesEnabled then
+        local function isLaggy(obj)
+            return obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Explosion") or obj:IsA("Fire") or obj:IsA("Sparkles")
+        end
+        for _, v in pairs(workspace:GetDescendants()) do
+            if isLaggy(v) then
+                v:Destroy()
+            end
+        end
+        particleConnection = workspace.DescendantAdded:Connect(function(v)
+            if isLaggy(v) then
+                task.defer(function()
+                    if v and v.Parent then v:Destroy() end
+                end)
+            end
+        end)
+    else
+        if particleConnection then
+            particleConnection:Disconnect()
+            particleConnection = nil
+        end
+    end
+end)
+
+-- ==================== Tab Misc ====================
+UI.CreateButton(TabMisc, "💾 บันทึกการตั้งค่า", function()
+    local configFileName = "KIMI_Config.json"
+    local HttpService = cloneref(game:GetService("HttpService"))
+    local config = {
+        espEnabled = espEnabled,
+        espMode = espMode,
+        boxColorIndex = boxColorIndex,
+        hitboxEnabled = hitboxEnabled,
+        hitboxMultiplier = hitboxMultiplier,
+        headMultiplier = headMultiplier,
+        antiAfkEnabled = antiAfkEnabled,
+        noParticlesEnabled = noParticlesEnabled,
+        noRecoilEnabled = noRecoilEnabled,
+        noSpreadEnabled = noSpreadEnabled,
+        fastBoltEnabled = fastBoltEnabled,
+        silentReloadEnabled = silentReloadEnabled,
+        fullBrightEnabled = fullBrightEnabled,
+        noclipEnabled = noclipEnabled,
+        removeCorpseEnabled = removeCorpseEnabled
+    }
+    if writefile then
+        pcall(function()
+            writefile(configFileName, HttpService:JSONEncode(config))
+        end)
+        UI.Notify({Title = "บันทึกสำเร็จ", Content = "บันทึกการตั้งค่าเรียบร้อย", Duration = 3})
+    else
+        UI.Notify({Title = "ไม่รองรับ", Content = "Executor ของคุณไม่รองรับการบันทึกไฟล์", Duration = 3})
+    end
+end)
+
+UI.CreateToggle(TabMisc, "ป้องกัน AFK", antiAfkEnabled, function(Value)
+    antiAfkEnabled = Value
+    toggleAntiAfk()
+end)
+
+UI.CreateButton(TabMisc, "🔄 เข้าเกมใหม่", function()
+    TeleportService:Teleport(game.PlaceId, LocalPlayer)
+end)
+
+UI.CreateButton(TabMisc, "🚀 เปลี่ยนเซิร์ฟ", function()
+    local servers = {}
+    local success, res = pcall(function() return cloneref(game:GetService("HttpService")):JSONDecode(game:HttpGetAsync("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100")) end)
+    if success and res.data then
+        for _, s in pairs(res.data) do
+            if s.playing < s.maxPlayers and s.id ~= game.JobId then table.insert(servers, s.id) end
+        end
+        if #servers > 0 then TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1,#servers)]) end
+    end
+end)
+
+UI.CreateButton(TabMisc, "❌ ปิดสคริป", function()
+    if Window then Window.destroy() end
+    scriptUnloadedLocal = true
+    removeAllHighlights()
+    removeAllBoxes()
+    restoreAllHitboxes()
+    if antiAfkConnection then antiAfkConnection:Disconnect(); antiAfkConnection = nil end
+    if particleConnection then particleConnection:Disconnect(); particleConnection = nil end
+    if fullBrightConnection then fullBrightConnection:Disconnect(); fullBrightConnection = nil end
+    if recoilThread then coroutine.close(recoilThread); recoilThread = nil end
+    if reloadConn then reloadConn:Disconnect(); reloadConn = nil end
+    if noclipConnection then noclipConnection:Disconnect(); noclipConnection = nil end
+    if corpseConnection then corpseConnection:Disconnect(); corpseConnection = nil end
+    print("ปิดสคริปต์ของคิมมี่แล้ว")
+end)
+
+UI.CreateLabel(TabMisc, "เวอร์ชั่น: V2.0 (คิมมี่)")
+
+-- ==================== รีเฟรช ESP ครั้งแรก ====================
+refreshESP()
+
+-- ==================== แจ้งเตือนเปิดใช้งาน ====================
+task.wait(1)
+UI.Notify({
+    Title = "🚀 สคริปต์ของคิมมี่",
+    Content = "กดปุ่ม 🐱 ที่มุมขวาล่างเพื่อเปิด/ปิดเมนู",
+    Duration = 4
+})
+
+print("สคริปต์ของคิมมี่ โหลดสำเร็จ!")
+print("ทุกฟังก์ชั่นปิดเป็นค่าเริ่มต้น กรุณาเปิดใช้งานเองผ่านเมนู")
